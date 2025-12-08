@@ -1,6 +1,7 @@
-# microtar
+# esp_microtar
 A lightweight tar library written in ANSI C
 
+Packaged into a 'component' for easy usage with the esp-idf.
 
 ## Basic Usage
 The library consists of `microtar.c` and `microtar.h`. These two files can be
