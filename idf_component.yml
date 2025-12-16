@@ -1,0 +1,12 @@
+## IDF Component Manager Manifest File
+dependencies:
+  ## Required IDF version
+  idf:
+    version: ">=4.1.0"
+
+  fs_utils:
+    git: git@github.com:Escape-This/escape-this-component-lib.git
+    path: components/fs_utils
+  code_snippets:
+    git: git@github.com:Escape-This/escape-this-component-lib.git
+    path: components/code_snippets
