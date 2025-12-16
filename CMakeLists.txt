@@ -8,6 +8,8 @@ idf_component_register(
 	# Put headers in PRIV_INCLUDE where possible
 #	PRIV_INCLUDE_DIRS "priv_include"
 	INCLUDE_DIRS "include"
+	
+	SRCS "src/tardir.c"
 
 
    	# files whose headers are in priv_include (only used in this component)

@@ -10,3 +10,6 @@ dependencies:
   code_snippets:
     git: git@github.com:Escape-This/escape-this-component-lib.git
     path: components/code_snippets
+  esp_cwalk:
+    git: git@github.com:Escape-This/escape-this-component-lib.git
+    path: components/esp_cwalk
