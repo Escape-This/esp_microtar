@@ -5,6 +5,8 @@
  */
 
 // ---- Test framework ---- //
+#include "esp_err.h"
+#include "fs_utils/load_file.h"
 #include "unity.h"
 
 // ---- Code to be tested ---- //
@@ -26,6 +28,7 @@
 
 #include <errno.h>
 
+#include "esp_log.h"
 #include "esp_system.h"  // Allows measuring currently available memory
 
 // ---- Local components ---- //
@@ -41,6 +44,10 @@
 // ---- Forward-declared static functions ---- //
 
 // ---- Global variables ---- //
+
+// Tag prepended to ESP_LOG messages in this component: can also be used to filter messages at runtime
+__attribute__((unused))
+static const char* TAG = "test_tardir";
 
 __attribute__((unused))
 static const char* SANITY = "sanity check for test-fixture";        //!< Marks tests which are to ensure the test-fixture is working correctly (not TDD)
@@ -117,6 +124,8 @@ TEST_CASE("Tar and untar a single file", "[esp_microtar]")
 	const char* input_file = LOCAL_TEST_DIR_INPUT "file.txt";
 	const char* filedata = "abcdef";
 	save_text(input_file, filedata);
+	TEST_ASSERT_TRUE_MESSAGE(file_exists(input_file), SANITY);
+
 	const char* expected_out_file  = LOCAL_TEST_DIR_OUTPUT "file.txt";
 	TEST_ASSERT_FALSE_MESSAGE(file_exists(expected_out_file), SANITY);
 
@@ -271,9 +280,6 @@ TEST_CASE("Tar and untar multiple files", "[esp_microtar][Not-TDD]")
 {
     LOCAL_TEST_setUp();
 
-    // Function arguments have attribute __nonnull__, so we need to pass it something...
-    const char* emptystr = "";
-
 	const char* tarball_path = LOCAL_TEST_DIR "test.tar";
 	
 	// Create files
@@ -324,7 +330,7 @@ TEST_CASE("Tar and untar multiple files", "[esp_microtar][Not-TDD]")
     LOCAL_TEST_tearDown();
 }
 
-TEST_CASE("Recurse into subdirectories", "[esp_microtar][TDD-dev]")
+TEST_CASE("Recurse into subdirectories", "[esp_microtar]")
 {
     LOCAL_TEST_setUp();
 
@@ -370,11 +376,180 @@ TEST_CASE("Recurse into subdirectories", "[esp_microtar][TDD-dev]")
 }
 
 
+TEST_CASE("Use O(1) memory, regardless of file sizes", "[esp_microtar]")
+{
+    LOCAL_TEST_setUp();
+
+	size_t fsize_big = 32 * 1024;
+	size_t fsize_bigger = 48 * 1024;
+	size_t fsize_difference = (fsize_bigger - fsize_big);
+
+	/* 	This requires some explanation
+	 *	Basically, we need a simple way to check that the function is using a scratch buffer,
+	 * 	not loading whole files into RAM before writing the. The options are:
+     *		- Add hooks in the memory system (hard)
+	 *		- Make sure there's no space in memory for a massive block (could take a while, especially for PSRAM!)
+	 *		- Measure the heap high-water mark, and see if it's dropped substantially
+	 *	The latter seems easiest, but will only work if the current heap is close to high-water mark
+	 * 	This code makes sure that is case.
+	 */
+	__free(vfree)
+	void* squat_on_memory = NULL;
+	{
+		uint32_t depth = esp_get_free_heap_size() - esp_get_minimum_free_heap_size();
+		ESP_LOGD(TAG, "Before: current=%u, min=%u, difference=%u", (uint)esp_get_free_heap_size(), (uint)esp_get_minimum_free_heap_size(), (uint)depth);
+	
+		if (depth > 1024) {
+			squat_on_memory = malloc(depth - 1024);
+			TEST_ASSERT_NOT_NULL_MESSAGE(squat_on_memory, "failed to malloc, test cannot proceed");
+		}
+		
+		depth = esp_get_free_heap_size() - esp_get_minimum_free_heap_size();
+		ESP_LOGD(TAG, "After: current=%u, min=%u, difference=%u", (uint)esp_get_free_heap_size(), (uint)esp_get_minimum_free_heap_size(), (uint)depth);
+		
+		// The difference will still be > 500 or therabouts, simply due to background stuff
+		// As long as it's smaller than the difference in file size's
+		TEST_ASSERT_LESS_THAN_MESSAGE((fsize_difference / 2), depth, "heap minimum_free is too low, test cannot proceed");
+	}
+
+	const char* tarball_path = LOCAL_TEST_DIR "binary.tar";
+
+	size_t set_buffer_size = 4 * 1024;	// Used to control the buffer sizes used
+	TEST_ASSERT_LESS_THAN_MESSAGE(fsize_big, set_buffer_size, "buffer should be smaller than the file, for the test to work");
+	
+	
+	// Create large-ish file
+	{
+		const char* input_file = LOCAL_TEST_DIR_INPUT "big_file.bin";
+		uint32_t test_data = 0x01234567;
+		uint32_t buffer[1024/4];
+		for (int i=0; i < ARRAY_LENGTH(buffer); i++) {
+			buffer[i] = test_data;
+		}
+		for (int i=0; i < (fsize_big); i += sizeof(buffer)) {
+			append_binary_file(input_file, &buffer, sizeof(buffer));
+		}
+		TEST_ASSERT_EQUAL_MESSAGE(fsize_big, filesize(input_file), SANITY);
+	
+		const char* expected_out_file  = LOCAL_TEST_DIR_OUTPUT "big_file.bin";
+		TEST_ASSERT_FALSE_MESSAGE(file_exists(expected_out_file), SANITY);
+	
+		// Make tarball
+		{
+		    pack_dir_to_tarball_opts_t options = {
+				.buffer_size = set_buffer_size,	
+			};
+		    esp_err_t err = pack_dir_to_tarball(LOCAL_TEST_DIR_INPUT, tarball_path, options);
+			TEST_ASSERT_EQUAL(ESP_OK, err);
+		}
+	
+		TEST_ASSERT_TRUE(file_exists(tarball_path));
+		
+		// Unpack tarball
+		{
+		    unpack_tarball_to_dir_opts_t options = {
+				.buffer_size = set_buffer_size,	
+};
+		    esp_err_t err = unpack_tarball_to_dir(tarball_path, LOCAL_TEST_DIR_OUTPUT, options);
+			TEST_ASSERT_EQUAL(ESP_OK, err);
+		}
+
+		// Check it's the same file
+		TEST_ASSERT_EQUAL_MESSAGE(0, diff_file(input_file, expected_out_file), SANITY);
+	}
+
+	uint32_t min_free_1 = esp_get_minimum_free_heap_size();
+
+	// Repeat with a larger file (44kB)
+	{
+		const char* input_file = LOCAL_TEST_DIR_INPUT "even_bigger_file.bin";
+		uint32_t test_data = 0x01234567;
+		uint32_t buffer[1024/4];
+		for (int i=0; i < ARRAY_LENGTH(buffer); i++) {
+			buffer[i] = test_data;
+		}
+		for (int i=0; i < (fsize_bigger); i += sizeof(buffer)) {
+			append_binary_file(input_file, &buffer, sizeof(buffer));
+		}
+		TEST_ASSERT_EQUAL_MESSAGE(fsize_bigger, filesize(input_file), SANITY);
+	
+		const char* expected_out_file  = LOCAL_TEST_DIR_OUTPUT "even_bigger_file.bin";
+		TEST_ASSERT_FALSE_MESSAGE(file_exists(expected_out_file), SANITY);
+	
+		// Make tarball
+		{
+		    pack_dir_to_tarball_opts_t options = {
+				.buffer_size = set_buffer_size,	
+};
+		    esp_err_t err = pack_dir_to_tarball(LOCAL_TEST_DIR_INPUT, tarball_path, options);
+			TEST_ASSERT_EQUAL(ESP_OK, err);
+		}
+	
+		TEST_ASSERT_TRUE(file_exists(tarball_path));
+		
+		// Unpack tarball
+		{
+		    unpack_tarball_to_dir_opts_t options = {
+				.buffer_size = set_buffer_size,	
+          };
+		    esp_err_t err = unpack_tarball_to_dir(tarball_path, LOCAL_TEST_DIR_OUTPUT, options);
+			TEST_ASSERT_EQUAL(ESP_OK, err);
+		}
+
+		// Check it's the same file
+		TEST_ASSERT_EQUAL_MESSAGE(0, diff_file(input_file, expected_out_file), SANITY);
+	}
+
+
+	uint32_t min_free_2 = esp_get_minimum_free_heap_size();	// always <= the previous reading
+	uint32_t difference = min_free_1 - min_free_2;	// always positive
+	
+	// Min should be about the same, should definitely not be 16kB smaller. Pick a medium, in case of 'noise'
+	TEST_ASSERT_LESS_THAN((fsize_difference / 2), difference);	// Not tight enough to be reliable
+	TEST_ASSERT_LESS_THAN(2048, difference);	// Tighter test, in case the noise gets larger
+	TEST_ASSERT_LESS_THAN(512, difference);		// Possibly too tight of a test
+	
+
+    LOCAL_TEST_tearDown();
+}
 
 
 
+TEST_CASE("Memory size option must be either 0, or above a minimum amount", "[esp_microtar]")
+{
+    LOCAL_TEST_setUp();
 
+	const char* tarball_path = LOCAL_TEST_DIR "test.tar";
+	
+	// Create file
+	const char* input_file = LOCAL_TEST_DIR_INPUT "file.txt";
+	const char* filedata = "abcdef";
+	save_text(input_file, filedata);
+	TEST_ASSERT_TRUE_MESSAGE(file_exists(input_file), SANITY);
 
+	const char* expected_out_file  = LOCAL_TEST_DIR_OUTPUT "file.txt";
+	TEST_ASSERT_FALSE_MESSAGE(file_exists(expected_out_file), SANITY);
+
+	// Make tarball
+	{
+	    pack_dir_to_tarball_opts_t options = {
+			.buffer_size = 10,
+		};
+	    esp_err_t err = pack_dir_to_tarball(LOCAL_TEST_DIR_INPUT, tarball_path, options);
+		TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE, err);
+	}
+	
+	// Unpack tarball
+	{
+	    unpack_tarball_to_dir_opts_t options = {
+			.buffer_size = 10,
+		};
+	    esp_err_t err = unpack_tarball_to_dir(tarball_path, LOCAL_TEST_DIR_OUTPUT, options);
+		TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE, err);
+	}
+
+    LOCAL_TEST_tearDown();
+}
 
 
 
