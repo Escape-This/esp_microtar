@@ -310,7 +310,8 @@ static esp_err_t pack_dir(const char* dirpath, const char* output_path, pack_dir
 		return ESP_ERR_NOT_FOUND;
 	}
 
-	if (false == dir_exists(path_parent(output_path))) {
+	__free(vfree) char* output_dir = path_parent(output_path);
+	if (NULL == output_dir || false == dir_exists(output_dir)) {
 		ESP_LOGW(TAG, "Cannot make tarball at '%s': %s", output_path, "parent directory does not exists");
 		return ESP_ERR_NOT_FOUND;
 	}
