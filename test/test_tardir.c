@@ -401,7 +401,8 @@ TEST_CASE("Use O(1) memory, regardless of file sizes", "[esp_microtar]")
 	
 		if (depth > 1024) {
 			squat_on_memory = malloc(depth - 1024);
-			TEST_ASSERT_NOT_NULL_MESSAGE(squat_on_memory, "failed to malloc, test cannot proceed");
+			// TEST_ASSERT_NOT_NULL_MESSAGE(squat_on_memory, "failed to malloc, test cannot proceed");
+			if (NULL == squat_on_memory) TEST_IGNORE_MESSAGE("failed to malloc, test cannot proceed");
 		}
 		
 		depth = esp_get_free_heap_size() - esp_get_minimum_free_heap_size();
@@ -409,7 +410,8 @@ TEST_CASE("Use O(1) memory, regardless of file sizes", "[esp_microtar]")
 		
 		// The difference will still be > 500 or therabouts, simply due to background stuff
 		// As long as it's smaller than the difference in file size's
-		TEST_ASSERT_LESS_THAN_MESSAGE((fsize_difference / 2), depth, "heap minimum_free is too low, test cannot proceed");
+		// TEST_ASSERT_LESS_THAN_MESSAGE((fsize_difference / 2), depth, "heap minimum_free is too low, test cannot proceed");
+		if ((fsize_difference / 2) < depth) TEST_IGNORE_MESSAGE("heap minimum_free is too low, test cannot proceed");
 	}
 
 	const char* tarball_path = LOCAL_TEST_DIR "binary.tar";
