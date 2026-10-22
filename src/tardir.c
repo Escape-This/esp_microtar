@@ -97,125 +97,6 @@ esp_err_t unpack_tarball_to_dir(const char* tarball, const char* output_dir, unp
 // ---- 'Private' function definitions ---- //
 
 
-
-// Functions used by pack_dir_
-
-esp_err_t unpack_dir__foreach(const char* tarball,
-		const char* output_dir,
-		unpack_tarball_to_dir_opts_t option,
-		mtar_t* tar,
-		const mtar_header_t h,
-		char* buf,
-		const size_t bufsize
-)
-{
-	// To save memory, we use 'buf' for absolute path calculation
-	assert(bufsize >= PATH_MAX);
-	char* absolute_path = buf;
-
-	size_t intended_size = 1 + cwk_path_join(output_dir, h.name, absolute_path, PATH_MAX);		
-    if (intended_size > PATH_MAX) {
-        errno = ENAMETOOLONG;
-        return ESP_ERR_INVALID_SIZE;
-    }
-
-	// Make sure the containing directory exists first!
-	mkdir_parents(absolute_path);
-
-    __free(filefree)
-	FILE* fd = fopen(absolute_path, "w");
-    if (fd == NULL) {
-        return ESP_FAIL;
-    }
-
-	// We're done using absolute_path, now we can use the buffer for read/write
-	absolute_path = NULL;
-
-	long position = 0;
-	while(1) {
-		portYIELD();	// Large files could take a while
-
-		long remaining = h.size - position;
-		if (remaining == 0) break;
-
-		long target = (remaining > bufsize) ? bufsize : remaining;
-		int tar_err = mtar_read_data(tar, buf, target);
-		if (tar_err != MTAR_ESUCCESS) {
-			ESP_LOGE(TAG, "Error while reading '%s' from tarball at '%s', error code = %d", h.name, tarball, tar_err);
-			return ESP_FAIL;
-		}
-
-		int bytes_written = fwrite(buf, 1, target, fd);
-		if (bytes_written < target) {
-			// Re-calculate absolute path, so we can use it in the error message
-			char* absolute_path = buf;
-			cwk_path_join(output_dir, h.name, absolute_path, PATH_MAX);		
-			
-			ESP_LOGE(TAG, "Error while writing to '%s': %s", absolute_path, strerror(errno));
-			return ESP_FAIL;
-		}
-		assert(bytes_written == target);
-
-		position += target;
-	}
-
-	FILE* fd_check = no_free_ptr(fd);
-    int ret = fclose(fd_check);
-    if (ret != 0) {
-		// Re-calculate absolute path, so we can use it in the error message
-		char* absolute_path = buf;
-		cwk_path_join(output_dir, h.name, absolute_path, PATH_MAX);		
-        
-		ESP_LOGE(TAG, "Error during fclose() of file '%s': %s", absolute_path, strerror(errno));
-		return ESP_FAIL;
-    }
-
-	return ESP_OK;
-}
-
-
-esp_err_t unpack_dir(const char* tarball, const char* output_dir, unpack_tarball_to_dir_opts_t option)
-{
-	if (!file_exists(tarball)) {
-		ESP_LOGW(TAG, "Cannot unpack '%s' : %s", tarball, strerror(errno));
-		return ESP_ERR_NOT_FOUND;
-	}
-
-	if (!dir_exists(output_dir)) {
-		ESP_LOGW(TAG, "No such directory '%s' : %s", output_dir, strerror(errno));
-		return ESP_ERR_NOT_FOUND;
-	}
-
-	ESP_LOGD(TAG, "Unpacking contents of '%s' into '%s'", tarball, output_dir);
-
-	// Allocate once, the buffer used by each callback invocation
-	size_t bufsize = option.buffer_size;
-    __free(vfree) char* buf = malloc(bufsize);
-
-	// Create/open tarball
-	__free(mtarfree)
-	mtar_t tar;
-    int tar_err = mtar_open(&tar, tarball, "rb");
-	if (tar_err != MTAR_ESUCCESS) {
-		ESP_LOGE(TAG, "Error while opening tarball '%s', error code = %d", tarball, tar_err);
-		return ESP_FAIL;
-	}
-
-	mtar_header_t h;
-	int i=0;
-	while ( (mtar_read_header(&tar, &h)) != MTAR_ENULLRECORD ) {
-		ESP_LOGD(TAG, "Tarball '%s' position [%d] has %u Byte file '%s'", tarball, i, h.size, h.name);
-
-		esp_err_t err = unpack_dir__foreach(tarball, output_dir, option, &tar, h, buf, bufsize);
-		ESP_RETURN_ON_ERROR(err, TAG, "unpack_dir_foreach returned error: %s", strerror(errno));
-
-		mtar_next(&tar);
-		i++;
-	}
-
-	return ESP_OK;
-}
-
 // Callbacks by pack_dir
 
 // Context struct passed to each invocation
@@ -360,6 +241,126 @@ delete_tar_file:
 	return ESP_FAIL;
 }
 
+
+
+// Callbacks by pack_dir
+
+// Context struct passed to each invocation
+esp_err_t unpack_dir__foreach(const char* tarball,
+		const char* output_dir,
+		unpack_tarball_to_dir_opts_t option,
+		mtar_t* tar,
+		const mtar_header_t h,
+		char* buf,
+		const size_t bufsize
+)
+{
+	// To save memory, we use 'buf' for absolute path calculation
+	assert(bufsize >= PATH_MAX);
+	char* absolute_path = buf;
+
+	size_t intended_size = 1 + cwk_path_join(output_dir, h.name, absolute_path, PATH_MAX);		
+    if (intended_size > PATH_MAX) {
+        errno = ENAMETOOLONG;
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+	// Make sure the containing directory exists first!
+	mkdir_parents(absolute_path);
+
+    __free(filefree)
+	FILE* fd = fopen(absolute_path, "w");
+    if (fd == NULL) {
+        return ESP_FAIL;
+    }
+
+	// We're done using absolute_path, now we can use the buffer for read/write
+	absolute_path = NULL;
+
+	long position = 0;
+	while(1) {
+		portYIELD();	// Large files could take a while
+
+		long remaining = h.size - position;
+		if (remaining == 0) break;
+
+		long target = (remaining > bufsize) ? bufsize : remaining;
+		int tar_err = mtar_read_data(tar, buf, target);
+		if (tar_err != MTAR_ESUCCESS) {
+			ESP_LOGE(TAG, "Error while reading '%s' from tarball at '%s', error code = %d", h.name, tarball, tar_err);
+			return ESP_FAIL;
+		}
+
+		int bytes_written = fwrite(buf, 1, target, fd);
+		if (bytes_written < target) {
+			// Re-calculate absolute path, so we can use it in the error message
+			char* absolute_path = buf;
+			cwk_path_join(output_dir, h.name, absolute_path, PATH_MAX);		
+			
+			ESP_LOGE(TAG, "Error while writing to '%s': %s", absolute_path, strerror(errno));
+			return ESP_FAIL;
+		}
+		assert(bytes_written == target);
+
+		position += target;
+	}
+
+	FILE* fd_check = no_free_ptr(fd);
+    int ret = fclose(fd_check);
+    if (ret != 0) {
+		// Re-calculate absolute path, so we can use it in the error message
+		char* absolute_path = buf;
+		cwk_path_join(output_dir, h.name, absolute_path, PATH_MAX);		
+        
+		ESP_LOGE(TAG, "Error during fclose() of file '%s': %s", absolute_path, strerror(errno));
+		return ESP_FAIL;
+    }
+
+	return ESP_OK;
+}
+
+
+esp_err_t unpack_dir(const char* tarball, const char* output_dir, unpack_tarball_to_dir_opts_t option)
+{
+	if (!file_exists(tarball)) {
+		ESP_LOGW(TAG, "Cannot unpack '%s' : %s", tarball, strerror(errno));
+		return ESP_ERR_NOT_FOUND;
+	}
+
+	if (!dir_exists(output_dir)) {
+		ESP_LOGW(TAG, "No such directory '%s' : %s", output_dir, strerror(errno));
+		return ESP_ERR_NOT_FOUND;
+	}
+
+	ESP_LOGD(TAG, "Unpacking contents of '%s' into '%s'", tarball, output_dir);
+
+	// Allocate once, the buffer used by each callback invocation
+	size_t bufsize = option.buffer_size;
+    __free(vfree) char* buf = malloc(bufsize);
+
+	// Create/open tarball
+	__free(mtarfree)
+	mtar_t tar;
+    int tar_err = mtar_open(&tar, tarball, "rb");
+	if (tar_err != MTAR_ESUCCESS) {
+		ESP_LOGE(TAG, "Error while opening tarball '%s', error code = %d", tarball, tar_err);
+		return ESP_FAIL;
+	}
+
+	mtar_header_t h;
+	int i=0;
+	while ( (mtar_read_header(&tar, &h)) != MTAR_ENULLRECORD ) {
+		ESP_LOGD(TAG, "Tarball '%s' position [%d] has %u Byte file '%s'", tarball, i, h.size, h.name);
+
+		esp_err_t err = unpack_dir__foreach(tarball, output_dir, option, &tar, h, buf, bufsize);
+		ESP_RETURN_ON_ERROR(err, TAG, "unpack_dir_foreach returned error: %s", strerror(errno));
+
+		mtar_next(&tar);
+		i++;
+	}
+
+	return ESP_OK;
+}
 
 // Reminder to remove this later if we (or gcc) can fix the false-positives
 #pragma GCC diagnostic warning "-Wcpp"
