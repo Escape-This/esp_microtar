@@ -20,9 +20,6 @@
 #include <stdio.h>
 #include "errno.h"
 
-#include "fs_utils/filepath.h"
-#include "portmacro.h"
-
 //#include "esp_vfs.h"
 
 // ---- Local components ---- //
@@ -159,7 +156,7 @@ static int pack_dir__file(const char* path, void* ctx_p)
 
 		long position = 0;
 		while(1) {
-			portYIELD();	// Large files could take a while
+		if (ctx->option.yieldFn) ctx->option.yieldFn(); // Large files could take a while
 
 			long remaining = file_size - position;
 			if (remaining == 0) break;
@@ -251,7 +248,7 @@ esp_err_t unpack_dir__foreach(
 
 	long position = 0;
 	while(1) {
-		portYIELD();	// Large files could take a while
+		if (option.yieldFn) option.yieldFn();
 
 		long remaining = h.size - position;
 		if (remaining == 0) break;

@@ -26,7 +26,8 @@ extern "C" {
 typedef struct pack_dir_to_tarball_opts {
     bool print_files;	// Unused
     bool print_dirs;	// Unused
-
+    
+    void (*yieldFn)(void); // If not NULL, called every cycle. User can yield or delay if necessary
 	size_t buffer_size;	//! If set to zero, TARDIR_DEFAULT_BUFFER_SIZE will be used
 } pack_dir_to_tarball_opts_t;
 
@@ -49,6 +50,7 @@ typedef struct unpack_tarball_to_dir_opts {
     bool print_files;	// Unused
     bool print_dirs;	// Unused
 
+    void (*yieldFn)(void); // If not NULL, called every cycle. User can yield or delay if necessary
 	size_t buffer_size;	//! If set to zero, TARDIR_DEFAULT_BUFFER_SIZE will be used
 } unpack_tarball_to_dir_opts_t;
 
