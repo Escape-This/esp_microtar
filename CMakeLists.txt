@@ -9,6 +9,7 @@ idf_component_register(
 #	PRIV_INCLUDE_DIRS "priv_include"
 	INCLUDE_DIRS "include"
 	
+	SRCS "src/tardir_generic.c"
 	SRCS "src/tardir.c"
 
 
@@ -28,3 +29,5 @@ idf_component_register(
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Werror)	# Doesn't work?
 target_compile_options(${COMPONENT_LIB} PRIVATE -fanalyzer)
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wanalyzer-too-complex -Wno-error=analyzer-too-complex)  # Useful when -Werror is set
+

@@ -14,32 +14,19 @@
 
 #include "esp_err.h"
 
+// ---- Local files (this component) ---- //
+#include "esp_microtar/tardir_generic.h"
+
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define TARDIR_DEFAULT_BUFFER_SIZE (4 * 1024)
-#define TARDIR_MINIMUM_BUFFER_SIZE (PATH_MAX)
-
-typedef struct pack_dir_to_tarball_opts {
-    bool print_files;	// Unused
-    bool print_dirs;	// Unused
-
-	size_t buffer_size;	//! If set to zero, TARDIR_DEFAULT_BUFFER_SIZE will be used
-} pack_dir_to_tarball_opts_t;
+__attribute__((nonnull))
+esp_err_t pack_dir_to_tarball(const char* dir_in, const char* tarball_out, pack_dir_to_tarball_opts_t option);
 
 __attribute__((nonnull))
-esp_err_t pack_dir_to_tarball(const char* dirpath, const char* output_path, pack_dir_to_tarball_opts_t option);
-
-typedef struct unpack_tarball_to_dir_opts {
-    bool print_files;	// Unused
-    bool print_dirs;	// Unused
-
-	size_t buffer_size;	//! If set to zero, TARDIR_DEFAULT_BUFFER_SIZE will be used
-} unpack_tarball_to_dir_opts_t;
-
-__attribute__((nonnull))
-esp_err_t unpack_tarball_to_dir(const char* tarball, const char* output_path, unpack_tarball_to_dir_opts_t option);
+esp_err_t unpack_tarball_to_dir(const char* tarball_in, const char* output_path, unpack_tarball_to_dir_opts_t option);
 
 #ifdef __cplusplus
 }
