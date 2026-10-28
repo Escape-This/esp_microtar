@@ -23,10 +23,7 @@ extern "C" {
 #define TARDIR_DEFAULT_BUFFER_SIZE (4 * 1024)
 #define TARDIR_MINIMUM_BUFFER_SIZE (PATH_MAX)
 
-typedef struct pack_dir_to_tarball_opts {
-    bool print_files;	// Unused
-    bool print_dirs;	// Unused
-    
+typedef struct pack_dir_to_tarball_opts {   
     void (*yieldFn)(void); // If not NULL, called every cycle. User can yield or delay if necessary
 	size_t buffer_size;	//! If set to zero, TARDIR_DEFAULT_BUFFER_SIZE will be used
 } pack_dir_to_tarball_opts_t;
