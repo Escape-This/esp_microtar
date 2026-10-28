@@ -15,6 +15,7 @@
 
 #include <sys/stat.h>
 #include <sys/syslimits.h>
+#include <fcntl.h>
 #include <sys/unistd.h>
 #include <sys/dirent.h>
 #include <stdio.h>
@@ -67,6 +68,12 @@ DEFINE_FREE(vfree, void*, free(_T))
 DEFINE_FREE(filefree, FILE*, if (_T != NULL) fclose(_T))
 DEFINE_FREE(dirfree, DIR*, if (_T != NULL) closedir(_T))
 DEFINE_FREE(mtarfree, mtar_t, mtar_close(&_T))
+DEFINE_FREE(posix_close, int, if (_T >= 0) close(_T));
+DEFINE_FREE(posix_flushclose, int, if (_T >= 0)
+{
+fsync(_T);
+    close(_T);
+});
 
 // ---- Function definitions ---- //
 
@@ -134,12 +141,12 @@ static int pack_dir__file(const char* path, void* ctx_p)
 	        return -1;  // errno already set
 	    }
 
-		__free(filefree)
-    	FILE* fd = fopen(path, "r");
-	    if (fd == NULL) {
-			ESP_LOGE(TAG, "Error opening: %s", absolute_path);
-	        return -1;
-	    }
+		__free(posix_close)
+		int fd = open(absolute_path, O_RDONLY);
+		if (fd < 0) {
+			ESP_LOGW(TAG, "cannot open file %s : %s", absolute_path, strerror(errno));
+			return -1;
+		}
 
 		int tar_err;
 		tar_err = mtar_write_file_header(ctx->tar, relative_path, file_size);
@@ -150,31 +157,28 @@ static int pack_dir__file(const char* path, void* ctx_p)
 
 		// We're done using relative_path, now we can use the buffer for read/write
 		relative_path = NULL;
-		size_t bufsize = ctx->bufsize;
-		char* buf = ctx->buf;
+		size_t buffer_size = ctx->bufsize;
+		char* buffer = ctx->buf;
 
-		long position = 0;
-		while(1) {
-		if (ctx->option.yieldFn) ctx->option.yieldFn(); // Large files could take a while
+		while (1) {
+			if (ctx->option.yieldFn) ctx->option.yieldFn(); // Large files could take a while
 
-			long remaining = file_size - position;
-			if (remaining == 0) break;
-
-			long target = (remaining > bufsize) ? bufsize : remaining;
-			int bytes_read = fread(buf, 1, target, fd);
-			if (bytes_read < target) {
-				ESP_LOGE(TAG, "Error reading from: %s", absolute_path);
+			int n_read = read(fd, buffer, buffer_size);
+			if (n_read < 0) {
+				perror("read error");
 				return -1;
 			}
-			assert(bytes_read == target);
 
-			tar_err = mtar_write_data(ctx->tar, buf, bytes_read);
+			if (n_read == 0) {
+				// No more data
+				break;
+			}
+
+			tar_err = mtar_write_data(ctx->tar, buffer, n_read);
 			if (tar_err != MTAR_ESUCCESS) {
 				ESP_LOGE(TAG, "Error writing tarball, error code = %d", tar_err);
 				return -1;
 			}
-
-			position += target;
 		}
 
     return 0;
@@ -236,19 +240,16 @@ esp_err_t unpack_dir__foreach(
 	// Make sure the containing directory exists first!
 	mkdir_parents(absolute_path);
 
-    __free(filefree)
-	FILE* fd = fopen(absolute_path, "w");
-    if (fd == NULL) {
-        return ESP_FAIL;
-    }
+    __free(posix_flushclose)
+    int fd = open(absolute_path, (O_WRONLY | O_CREAT | O_TRUNC));
+    ESP_RETURN_ON_FALSE(fd >= 0, -1, TAG, "failed to open '%s' for writing: %s", absolute_path, strerror(errno));
+
 
 	// We're done using absolute_path, now we can use the buffer for read/write
 	absolute_path = NULL;
 
 	long position = 0;
 	while(1) {
-		if (option.yieldFn) option.yieldFn();
-
 		long remaining = h.size - position;
 		if (remaining == 0) break;
 
@@ -259,30 +260,25 @@ esp_err_t unpack_dir__foreach(
 			return ESP_FAIL;
 		}
 
-		int bytes_written = fwrite(buf, 1, target, fd);
-		if (bytes_written < target) {
-			// Re-calculate absolute path, so we can use it in the error message
-			char* absolute_path = buf;
-			cwk_path_join(output_dir, h.name, absolute_path, PATH_MAX);		
-			
-			ESP_LOGE(TAG, "Error while writing to '%s': %s", absolute_path, strerror(errno));
-			return ESP_FAIL;
-		}
-		assert(bytes_written == target);
+		int todo = target;
+        char* finger = buf;
+		while (todo > 0) {
+			if (option.yieldFn) option.yieldFn();
+
+            int n_written = write(fd, finger, todo);
+			if (n_written < 0) {
+				// Re-calculate absolute path, so we can use it in the error message
+				char* absolute_path = buf;
+				cwk_path_join(output_dir, h.name, absolute_path, PATH_MAX);	
+				ESP_LOGE(TAG, "Error while writing to '%s': %s", absolute_path, strerror(errno));
+				return ESP_FAIL;
+			}
+            todo -= n_written;
+            finger += n_written;
+        }
 
 		position += target;
 	}
-
-	FILE* fd_check = no_free_ptr(fd);
-    int ret = fclose(fd_check);
-    if (ret != 0) {
-		// Re-calculate absolute path, so we can use it in the error message
-		char* absolute_path = buf;
-		cwk_path_join(output_dir, h.name, absolute_path, PATH_MAX);		
-        
-		ESP_LOGE(TAG, "Error during fclose() of file '%s': %s", absolute_path, strerror(errno));
-		return ESP_FAIL;
-    }
 
 	return ESP_OK;
 }
