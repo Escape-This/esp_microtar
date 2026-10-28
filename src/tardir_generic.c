@@ -103,7 +103,6 @@ typedef struct {
 	const char* dirpath;
 
 	mtar_t* tar;
-	const char* output_path;	// Only used for log messages
 
 	char* buf;
 	const size_t bufsize;
@@ -145,7 +144,7 @@ static int pack_dir__file(const char* path, void* ctx_p)
 		int tar_err;
 		tar_err = mtar_write_file_header(ctx->tar, relative_path, file_size);
 		if (tar_err != MTAR_ESUCCESS) {
-			ESP_LOGE(TAG, "Error while writing to '%s', error code = %d", ctx->output_path, tar_err);
+			ESP_LOGE(TAG, "Error writing tarball, error code = %d", tar_err);
 			return -1;
 		}
 
@@ -171,7 +170,7 @@ static int pack_dir__file(const char* path, void* ctx_p)
 
 			tar_err = mtar_write_data(ctx->tar, buf, bytes_read);
 			if (tar_err != MTAR_ESUCCESS) {
-				ESP_LOGE(TAG, "Error while writing to '%s', error code = %d", ctx->output_path, tar_err);
+				ESP_LOGE(TAG, "Error writing tarball, error code = %d", tar_err);
 				return -1;
 			}
 
